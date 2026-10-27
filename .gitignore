@@ -1,0 +1,5 @@
+# company data (confidential)
+*.xlsx
+*.pkl
+data/
+__pycache__/

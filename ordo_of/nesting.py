@@ -1,0 +1,253 @@
+"""
+Guillotine nesting heuristic for one panel material (pattern based).
+
+All dimensions are in 1/10 mm.
+  Stage 1: rip cuts across the panel width  -> strips of height h, full usable length
+  Stage 2: cross cuts in a strip            -> columns of length l (grain direction)
+  Stage 3: cuts in a column                 -> m identical pieces stacked (w + kerf each)
+
+Grain (SensFil): the panel grain runs along its X (length).
+  piece grain 'X' -> piece X along panel X
+  piece grain 'Y' -> piece rotated, its Y along panel X
+  no grain        -> free orientation (narrowest strip chosen)
+
+Algorithm
+  1. Strip patterns: for the widest remaining mandatory piece width h, solve a
+     bounded knapsack on the strip length (dynamic programming, 1 mm grid):
+     items = columns of each article that fits (w <= h), value = piece area.
+     Optional pieces may enter with a lower value (they only fill gaps).
+     The best pattern is repeated as many times as the stock of pieces allows
+     (cutting-stock idea) -> few DP calls.
+  2. Strips are packed into panels by First Fit Decreasing on their height.
+  3. Leftover height of each panel is filled with strips of optional pieces only,
+     so optional pieces never open a new panel.
+
+Waste (TdC) = 1 - piece area / (panels * panel area - reusable offcut of the last panel)
+"""
+from dataclasses import dataclass
+import numpy as np
+
+
+@dataclass
+class Panel:
+    L: int = 26550          # length (grain direction)
+    W: int = 21000          # width
+    trim: int = 210         # cleaning cut per side, kerf included
+    kerf: int = 44
+    reste_min_l: int = 8000
+    reste_min_w: int = 8000
+
+    @property
+    def Lu(self):
+        return self.L - 2 * self.trim
+
+    @property
+    def Wu(self):
+        return self.W - 2 * self.trim
+
+    @property
+    def area(self):
+        return self.L * self.W
+
+
+def orient(X, Y, sens):
+    if sens == "X":
+        return [(X, Y)]
+    if sens == "Y":
+        return [(Y, X)]
+    return [(X, Y), (Y, X)]
+
+
+class Nester:
+    GRID = 10  # DP resolution: 10 x 0.1 mm = 1 mm
+
+    def __init__(self, articles, panel=None, opt_weight=0.97):
+        """articles: dict art -> (X, Y, SensFil)"""
+        self.panel = panel or Panel()
+        self.opt_weight = opt_weight
+        self.dims, self.area = {}, {}
+        P = self.panel
+        for a, (X, Y, s) in articles.items():
+            o = [d for d in orient(int(X), int(Y), s) if d[0] <= P.Lu and d[1] <= P.Wu]
+            if not o:
+                raise ValueError(f"article {a} does not fit the panel")
+            self.dims[a] = min(o, key=lambda d: d[1])
+            self.area[a] = int(X) * int(Y)
+
+    # ------------------------------------------------------------ strip pattern
+    def _pattern(self, h, mand, opt):
+        """Best set of columns for a strip of height h. Returns {(pool, art): n_pieces}."""
+        P, k, g = self.panel, self.panel.kerf, self.GRID
+        cap = (P.Lu + k) // g
+        items = []  # (weight, value, pool, art, pieces_in_column)
+        for pool, wgt in ((mand, 1.0), (opt, self.opt_weight)):
+            for a, n in pool.items():
+                if n <= 0:
+                    continue
+                l, w = self.dims[a]
+                if w > h:
+                    continue
+                m = (h + k) // (w + k)              # pieces per column
+                full, part = divmod(n, m)
+                wt = -(-(l + k) // g)               # ceil
+                if full:
+                    # binary splitting of `full` identical columns
+                    c = 1
+                    while full > 0:
+                        t = min(c, full)
+                        items.append((wt * t, wgt * self.area[a] * m * t, pool, a, m * t))
+                        full -= t
+                        c *= 2
+                if part:
+                    items.append((wt, wgt * self.area[a] * part, pool, a, part))
+        if not items:
+            return {}
+        best = np.zeros(cap + 1)
+        take = np.zeros((len(items), cap + 1), dtype=bool)
+        for j, (wt, val, *_ ) in enumerate(items):
+            if wt > cap:
+                continue
+            cand = np.full(cap + 1, -1.0)
+            cand[wt:] = best[:-wt] + val
+            better = cand > best + 1e-9
+            take[j] = better
+            best = np.where(better, cand, best)
+        c = int(np.argmax(best))
+        pat = {}
+        for j in range(len(items) - 1, -1, -1):
+            if take[j, c]:
+                wt, _, pool, a, npc = items[j]
+                key = (id(pool), a)
+                pat[key] = pat.get(key, 0) + npc
+                c -= wt
+        return pat
+
+    def _strips(self, mand, opt, only_opt_h=None):
+        """Generate strips; returns list of (h, {art: n}, piece_area)."""
+        pools = {id(mand): mand, id(opt): opt}
+        out = []
+        while True:
+            if only_opt_h is None:
+                rem = [a for a, n in mand.items() if n > 0]
+                if not rem:
+                    break
+                h = max(self.dims[a][1] for a in rem)
+                pat = self._pattern(h, mand, opt)
+                if not any(pid == id(mand) for pid, _ in pat):
+                    pat = self._pattern(h, mand, {})  # guarantee progress
+            else:
+                return out
+            # pieces actually used, and how many times the pattern can repeat
+            reps = min(pools[pid][a] // n for (pid, a), n in pat.items())
+            reps = max(reps, 1)
+            content, parea = {}, 0
+            for (pid, a), n in pat.items():
+                pools[pid][a] -= n * reps
+                content[a] = content.get(a, 0) + n
+                parea += n * self.area[a]
+            # real strip height = widest piece used
+            h_real = max(self.dims[a][1] for a in content)
+            out.extend([(h_real, content, parea)] * reps)
+        return out
+
+    def _fill_height(self, rem_h, opt):
+        """One strip of optional pieces fitting in rem_h, or None."""
+        cands = [a for a, n in opt.items() if n > 0 and self.dims[a][1] <= rem_h]
+        if not cands:
+            return None
+        best = None
+        for h in sorted({self.dims[a][1] for a in cands}, reverse=True)[:4]:
+            pat = self._pattern(h, {}, opt)
+            val = sum(n * self.area[a] for (_, a), n in pat.items())
+            if pat and (best is None or val / h > best[0]):
+                best = (val / h, h, pat)
+        if not best:
+            return None
+        _, h, pat = best
+        content, parea = {}, 0
+        for (_, a), n in pat.items():
+            opt[a] -= n
+            content[a] = content.get(a, 0) + n
+            parea += n * self.area[a]
+        return (max(self.dims[a][1] for a in content), content, parea)
+
+    # ------------------------------------------------------------------- panels
+    def nest(self, mandatory, optional=None):
+        P, k = self.panel, self.panel.kerf
+        mand = {a: int(n) for a, n in mandatory.items() if n > 0}
+        opt = {a: int(n) for a, n in (optional or {}).items() if n > 0}
+        opt0 = dict(opt)
+        strips = self._strips(mand, opt)
+        strips.sort(key=lambda s: -s[0])
+        panels = []  # [used_height, [strips]]
+        for s in strips:
+            for p in panels:
+                if p[0] + k + s[0] <= P.Wu:
+                    p[0] += k + s[0]
+                    p[1].append(s)
+                    break
+            else:
+                panels.append([s[0], [s]])
+        for p in panels:
+            while True:
+                s = self._fill_height(P.Wu - p[0] - k, opt)
+                if s is None:
+                    break
+                p[0] += k + s[0]
+                p[1].append(s)
+
+        n_pan = len(panels)
+        piece_area = sum(s[2] for p in panels for s in p[1])
+        reste = 0
+        if panels:
+            rem = P.Wu - min(p[0] for p in panels) - k
+            if rem >= P.reste_min_w:
+                reste = rem * P.Lu
+        consumed = n_pan * P.area - reste
+        panel_items = []
+        for p in panels:
+            d = {}
+            for s in p[1]:
+                for a, n in s[1].items():
+                    d[a] = d.get(a, 0) + n
+            panel_items.append(d)
+        return {
+            "n_panels": n_pan,
+            "tdc": 1 - piece_area / consumed if consumed else 0.0,
+            "piece_area": piece_area,
+            "consumed_area": consumed,
+            "reste_area": reste,
+            "optional_cut": {a: opt0[a] - opt[a] for a in opt0 if opt0[a] > opt[a]},
+            "panels": panel_items,
+        }
+
+
+class BestNester:
+    """
+    Tries both first-cut directions and keeps the one with the fewest panels
+    (tie -> lower TdC):
+      'length': first cuts produce strips along the panel length (grain)
+      'width' : first cuts produce strips across the panel (transposed problem)
+    Grain constraints are preserved: transposing swaps panel and piece axes together.
+    """
+
+    def __init__(self, articles, panel=None, opt_weight=0.97, mode="best"):
+        panel = panel or Panel()
+        self.panel, self.mode = panel, mode
+        self.n_len = Nester(articles, panel, opt_weight)
+        pt = Panel(L=panel.W, W=panel.L, trim=panel.trim, kerf=panel.kerf,
+                   reste_min_l=panel.reste_min_w, reste_min_w=panel.reste_min_l)
+        self.n_wid = Nester.__new__(Nester)
+        self.n_wid.panel, self.n_wid.opt_weight = pt, opt_weight
+        self.n_wid.dims = {a: (w, l) for a, (l, w) in self.n_len.dims.items()}
+        self.n_wid.area = self.n_len.area
+        self.area, self.dims = self.n_len.area, self.n_len.dims
+
+    def nest(self, mandatory, optional=None):
+        res = []
+        if self.mode in ("best", "length"):
+            r = self.n_len.nest(mandatory, optional); r["first_cut"] = "length"; res.append(r)
+        if self.mode in ("best", "width"):
+            r = self.n_wid.nest(mandatory, optional); r["first_cut"] = "width"; res.append(r)
+        # value = useful area per consumed area, counting optional pieces as useful
+        return min(res, key=lambda r: (r["tdc"], r["n_panels"]))
