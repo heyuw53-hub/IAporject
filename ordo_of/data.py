@@ -2,7 +2,8 @@
 import os
 import pandas as pd
 
-DATA_DIR = os.environ.get("ORDO_DATA", "/mnt/user-data/uploads")
+# default: a "data" folder next to run.py (put the three Excel files there)
+DATA_DIR = os.environ.get("ORDO_DATA", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"))
 F_ART = "1793090026443_Automne_de_lIA_2026_SG_DDM_-_Données_articles_et_matières.xlsx"
 F_OF = "1793090026442_Automne_de_lIA_2026_SG_DDM_-_OFs_et_TdC.xlsx"
 F_MVT = "1793090026440_Automne_de_lIA_2026_SG_DDM_-_Mouvements_de_stock_montage.xlsx"

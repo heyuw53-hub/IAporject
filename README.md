@@ -2,10 +2,16 @@
 
 ## 运行
 
+```
+项目文件夹/
+├── run.py
+├── ordo_of/          （代码包，里面的 .py 不要单独运行）
+└── data/             （放三个 Excel 文件）
+```
+
 ```bash
-pip install pandas openpyxl scipy matplotlib
-export ORDO_DATA=/你的/数据/文件夹     # 放三个 Excel 文件
-python -m ordo_of.main                 # 约 15 秒，结果写入 ./results
+pip install -r requirements.txt
+python run.py          # 在项目文件夹里执行，约 15 秒，结果写入 ./results
 ```
 
 参数在 `ordo_of/main.py` 顶部：`MATIERE`、`SS_WEEKS`（安全库存，周）、`SMAX_WEEKS`（装配端库存上限，周）、`LOT_RULE`。
