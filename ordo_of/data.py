@@ -1,4 +1,5 @@
 """Load and prepare the Schmidt data for one material."""
+import glob
 import os
 import pandas as pd
 
@@ -10,7 +11,12 @@ F_MVT = "1793090026440_Automne_de_lIA_2026_SG_DDM_-_Mouvements_de_stock_montage.
 
 
 def _p(name):
-    return os.path.join(DATA_DIR, name)
+    """Find the Excel file by keyword, so prefixes / renamed files still work."""
+    key = {F_ART: "articles", F_OF: "OFs", F_MVT: "Mouvements"}[name]
+    found = [f for f in glob.glob(os.path.join(DATA_DIR, "*.xlsx")) if key in os.path.basename(f)]
+    if not found:
+        raise FileNotFoundError(f"no Excel containing '{key}' in DATA_DIR = {DATA_DIR}")
+    return found[0]
 
 
 def load_material(matiere=215371):

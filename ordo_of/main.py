@@ -122,17 +122,22 @@ def run():
         "qté totale": X2.sum().astype(int),
     })
     plan_out = X2.copy()
-    plan_out.index = [d.date() for d in plan_out.index]
+    plan_out.index = plan_out.index.strftime("%Y-%m-%d")
 
     kpi = b2.drop(columns=["_panels", "_x"]).copy()
     kpi["TdC"] = kpi.tdc
     with pd.ExcelWriter(os.path.join(OUT, f"resultats_{MATIERE}.xlsx")) as xw:
         syn.to_excel(xw, sheet_name="Synthese", index=False)
         hor.to_excel(xw, sheet_name="Horizon de regroupement", index=False)
+        kpi.index = kpi.index.strftime("%Y-%m-%d")   # date only, no hh:mm
+        kpi.index.name = "semaine"
         kpi.to_excel(xw, sheet_name="KPI hebdo B2")
         plan_out.T.to_excel(xw, sheet_name="Plan OF B2 (art x sem)")
         freq.sort_values("demande moy./sem.", ascending=False).to_excel(xw, sheet_name="Frequence par article")
-        pd.DataFrame({"B1": b1.tdc, "B2": b2.tdc, "B3": b3.tdc}).to_excel(xw, sheet_name="TdC hebdo")
+        th = pd.DataFrame({"B1": b1.tdc, "B2": b2.tdc, "B3": b3.tdc})
+        th.index = th.index.strftime("%Y-%m-%d")
+        th.index.name = "semaine"
+        th.to_excel(xw, sheet_name="TdC hebdo")
 
     # ---------------- figures
     fig, ax = plt.subplots(figsize=(10, 4))
