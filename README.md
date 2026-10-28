@@ -62,6 +62,7 @@ Les paramètres se trouvent en haut de `ordo_of/main.py`.
 | `SMAX_WEEKS` | 3.0 | Stock maximum au montage, en semaines de demande |
 | `LOT_RULE` | `"min"` | `"min"` : OF ≥ QteParOF ; `"multiple"` : OF = k × QteParOF |
 | `MAX_DELAI_SEMAINES` | 3 | Délai maximum entre le lancement d'un OF et sa livraison / l'utilisation de ses pièces |
+| `SEUIL_VOLUME` | 0.5 | Comparaison Schmidt : une semaine est ignorée si l'historique d'OF contient moins de 50 % du volume médian de la matière (extraction incomplète) |
 | `RESTES_AGE_MAX` | 4 | Une zone libre ≥ ResteMin (800 × 800 mm) devient un reste ; il est réutilisé en priorité les semaines suivantes, puis mis au rebut après 4 semaines |
 
 ## 4. Modèle mathématique

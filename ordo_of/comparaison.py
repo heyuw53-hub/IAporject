@@ -88,7 +88,8 @@ def weekly_tdc(matiere, restes_age_max=None):
             stock_0, reb = vieillir_restes(stock_0, restes_age_max)
             ca += reb
         out[s] = {"B0w": 1 - r["piece_area"] / ca_w, "B0": 1 - pa / ca,
-                  "pa": r["piece_area"], "ca_w": ca_w, "ca_0": ca}
+                  "pa": r["piece_area"], "ca_w": ca_w, "ca_0": ca,
+                  "pieces": int(g["Qté cdée"].sum())}
     return pd.DataFrame(out).T
 
 
@@ -213,8 +214,9 @@ def weekly_tdc_global(matieres, restes_age_max=None):
             tabs.append(weekly_tdc(m, restes_age_max))
         except Exception:      # matière sans OF / sans article
             pass
-    t = pd.concat(tabs).groupby(level=0)[["pa", "ca_w", "ca_0"]].sum()
-    return pd.DataFrame({"B0w": 1 - t.pa / t.ca_w, "B0": 1 - t.pa / t.ca_0})
+    t = pd.concat(tabs).groupby(level=0)[["pa", "ca_w", "ca_0", "pieces"]].sum()
+    return pd.DataFrame({"B0w": 1 - t.pa / t.ca_w, "B0": 1 - t.pa / t.ca_0,
+                         "pieces": t.pieces})
 
 
 def chart_nous(nom, weeks, y_semaine, y_jour, path, titre):

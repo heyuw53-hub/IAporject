@@ -33,6 +33,8 @@ SS_WEEKS = 0.5            # stock de sécurité au montage (semaines de demande)
 SMAX_WEEKS = 3.0          # stock maximum au montage (semaines de demande)
 LOT_RULE = "min"          # "min" : OF >= QteParOF ; "multiple" : OF = k x QteParOF
 MAX_DELAI_SEMAINES = 3    # délai max. entre lancement de l'OF et utilisation des pièces
+SEUIL_VOLUME = 0.5        # comparaison : semaine ignorée si moins de 50 % du volume médian
+                          # de la matière (historique OF incomplet, ex. début de l'extraction)
 RESTES_AGE_MAX = 4        # un reste (>= ResteMin) est gardé 4 semaines au plus, puis mis au rebut
 OUT = "results"
 
@@ -115,8 +117,15 @@ def run():
     for nom, titre, ours in graphs:
         sch = comparaison.SCHMIDT[nom]
         weeks = list(sch)                          # uniquement les semaines Schmidt
-        ys = [ours.B0w.get(w, np.nan) * 100 for w in weeks]
-        y0 = [ours.B0.get(w, np.nan) * 100 for w in weeks]
+        # semaines avec trop peu d'OF dans l'historique -> ignorées
+        seuil = SEUIL_VOLUME * ours.pieces.median()
+        garde = ours.index[ours.pieces >= seuil]
+        ys = [ours.B0w[w] * 100 if w in garde else np.nan for w in weeks]
+        y0 = [ours.B0[w] * 100 if w in garde else np.nan for w in weeks]
+        pcs = [int(ours.pieces[w]) if w in ours.index else 0 for w in weeks]
+        statut = ["pas d'OF dans le fichier" if w not in ours.index
+                  else ("ignorée : historique insuffisant" if w not in garde else "")
+                  for w in weeks]
         img_s = comparaison.schmidt_image(nom, os.path.join(tmp, f"schmidt_{nom}.png"))
         img_n = os.path.join(tmp, f"nous_{nom}.png")
         # semaines sans donnée retirées de l'axe -> courbe continue (comme Schmidt)
@@ -128,6 +137,7 @@ def run():
         tables.append(pd.DataFrame({
             "Graphique": titre, "Semaine": [f"2026/S{w}" for w in weeks],
             "TdC Schmidt (%)": [sch[w] for w in weeks],
+            "Pièces dans l'historique": pcs, "Semaine retenue ?": statut,
             "Notre recalcul, OF coupés par jour (%)": np.round(y0, 2),
             "OF regroupés par semaine (%)": np.round(ys, 2)}))
         print(f"{titre:45s} Schmidt {np.mean(np.array([sch[w] for w in weeks])[ok]):5.2f} %"
@@ -164,15 +174,16 @@ def run():
                 im = XLImage(img); im.width, im.height = W, H
                 ws.add_image(im, f"{col}{r}")
         r0 = 3 + len(pairs) * STEP + 1
-        ws.cell(r0 - 1, 1, "Valeurs (semaines S35–S37 : pas d'OF dans le fichier fourni ; "
-                           "valeurs Schmidt lues sur leurs graphiques)").font = Font(italic=True)
+        ws.cell(r0 - 1, 1, "Valeurs. Semaines ignorées : pas d'OF dans le fichier fourni, ou moins "
+                           "de 50 % du volume médian de la matière (historique incomplet). "
+                           "Valeurs Schmidt lues sur leurs graphiques ; moyennes sur les semaines retenues.").font = Font(italic=True)
         for j, col in enumerate(sheet3.columns, start=1):
             c = ws.cell(r0, j, col); c.font = Font(bold=True)
             c.fill = PatternFill("solid", fgColor="DDEBF7")
         for i, row in enumerate(sheet3.itertuples(index=False), start=1):
             for j, v in enumerate(row, start=1):
                 ws.cell(r0 + i, j, None if isinstance(v, float) and np.isnan(v) else v)
-        for col, w in {"A": 44, "B": 11, "C": 14, "D": 20, "E": 18}.items():
+        for col, w in {"A": 44, "B": 11, "C": 14, "D": 14, "E": 18}.items():
             ws.column_dimensions[col].width = w
     print("écrit :", path)
     return path
