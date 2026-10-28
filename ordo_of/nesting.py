@@ -225,7 +225,39 @@ class Nester:
             "reste_area": reste,
             "optional_cut": {a: opt0[a] - opt[a] for a in opt0 if opt0[a] > opt[a]},
             "panels": panel_items,
+            # hauteur libre en haut de chaque panneau (sur toute la longueur utile)
+            "panel_rem": [P.Wu - p[0] - k for p in panels],
         }
+
+    # ----------------------------------------------------------------- restes
+    def fill_reste(self, L, W, pool):
+        """
+        Remplit un reste L x W (L dans le sens du fil, bords déjà propres : pas de
+        coupe de propreté) avec les pièces de `pool` (modifié sur place).
+        Renvoie (contenu {article: n}, surface pièces, hauteur libre restante).
+        """
+        N = Nester.__new__(Nester)
+        N.panel = Panel(L=int(L), W=int(W), trim=0, kerf=self.panel.kerf,
+                        reste_min_l=self.panel.reste_min_l, reste_min_w=self.panel.reste_min_w)
+        N.opt_weight, N.area = self.opt_weight, self.area
+        N.orients = {a: [d for d in o if d[0] <= L and d[1] <= W]
+                     for a, o in self.orients.items()}
+        N.orients = {a: o for a, o in N.orients.items() if o}
+        N.dims = {a: min(o, key=lambda d: d[1]) for a, o in N.orients.items()}
+        sub = {a: n for a, n in pool.items() if a in N.dims and n > 0}
+        k, used, content, parea = self.panel.kerf, 0, {}, 0
+        while True:
+            free = W - used - (k if used else 0)
+            st = N._fill_height(free, sub)
+            if st is None:
+                break
+            used += (k if used else 0) + st[0]
+            for a, n in st[1].items():
+                content[a] = content.get(a, 0) + n
+            parea += st[2]
+        for a, n in content.items():
+            pool[a] -= n
+        return content, parea, W - used - (k if used else 0)
 
 
 class BestNester:
@@ -253,7 +285,64 @@ class BestNester:
         self.n_wid.area = self.n_len.area
         self.area, self.dims = self.n_len.area, self.n_len.dims
 
-    def nest(self, mandatory, optional=None):
+    def _qualifie(self, L, W):
+        P = self.panel
+        return L >= P.reste_min_l and W >= P.reste_min_w
+
+    def nest(self, mandatory, optional=None, restes=None):
+        """
+        restes = None  : pas de gestion de restes (ancien calcul).
+        restes = liste : stock de restes [{"L", "W", "age"}] (L dans le sens du fil).
+          1. les pièces obligatoires sont d'abord placées sur les restes du stock
+             (les plus grands d'abord) ;
+          2. le reste des pièces est imbriqué sur des panneaux neufs ;
+          3. toute zone libre >= ResteMin (haut des panneaux, fin des restes utilisés)
+             devient un nouveau reste.
+          Surface consommée = panneaux neufs + restes utilisés - restes créés.
+          Le résultat contient "restes_stock" : le nouveau stock (à vieillir ensuite).
+        """
+        if restes is None:
+            return self._nest_simple(mandatory, optional)
+        P, k = self.panel, self.panel.kerf
+        mand = {a: int(n) for a, n in mandatory.items() if n > 0}
+        used, created, r_panels, pa_r = [], [], [], 0
+        for r in sorted(restes, key=lambda r: -r["L"] * r["W"]):
+            if not any(n > 0 for n in mand.values()):
+                break
+            content, pa, free = self.n_len.fill_reste(r["L"], r["W"], mand)
+            if pa > 0:
+                used.append(r)
+                pa_r += pa
+                r_panels.append(content)
+                if self._qualifie(r["L"], free):
+                    created.append({"L": r["L"], "W": free, "age": 0})
+        rest = [r for r in restes if not any(r is u for u in used)]
+        best = None
+        for nest_, frame in ((self.n_len, "length"), (self.n_wid, "width")):
+            if self.mode not in ("best", frame):
+                continue
+            r = nest_.nest(mand, optional)
+            new = []
+            for free in r["panel_rem"]:
+                # restes dans le repère de la matière : L le long du fil (X)
+                L, W = (nest_.panel.Lu, free) if frame == "length" else (free, nest_.panel.Lu)
+                if self._qualifie(L, W):
+                    new.append({"L": L, "W": W, "age": 0})
+            cr = created + new
+            pa = r["piece_area"] + pa_r
+            ca = (r["n_panels"] * P.area + sum(u["L"] * u["W"] for u in used)
+                  - sum(c["L"] * c["W"] for c in cr))
+            out = dict(r, first_cut=frame, piece_area=pa, consumed_area=ca,
+                       tdc=1 - pa / ca if ca > 0 else 0.0,
+                       panels=r_panels + r["panels"], restes_stock=rest + cr,
+                       n_restes_utilises=len(used),
+                       surface_restes_utilises=sum(u["L"] * u["W"] for u in used),
+                       surface_restes_crees=sum(c["L"] * c["W"] for c in cr))
+            if best is None or (out["tdc"], out["n_panels"]) < (best["tdc"], best["n_panels"]):
+                best = out
+        return best
+
+    def _nest_simple(self, mandatory, optional=None):
         res = []
         if self.mode in ("best", "length"):
             r = self.n_len.nest(mandatory, optional); r["first_cut"] = "length"; res.append(r)
@@ -261,3 +350,16 @@ class BestNester:
             r = self.n_wid.nest(mandatory, optional); r["first_cut"] = "width"; res.append(r)
         # value = useful area per consumed area, counting optional pieces as useful
         return min(res, key=lambda r: (r["tdc"], r["n_panels"]))
+
+
+def vieillir_restes(stock, age_max):
+    """+1 semaine pour chaque reste ; ceux qui dépassent age_max sont mis au rebut.
+    Renvoie (nouveau stock, surface mise au rebut)."""
+    garde, rebut = [], 0
+    for r in stock:
+        r = dict(r, age=r["age"] + 1)
+        if r["age"] > age_max:
+            rebut += r["L"] * r["W"]
+        else:
+            garde.append(r)
+    return garde, rebut

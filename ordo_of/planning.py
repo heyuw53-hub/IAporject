@@ -28,6 +28,8 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import milp, LinearConstraint, Bounds
 
+from .nesting import vieillir_restes
+
 
 def params(art, demand, ss_weeks=0.5, smax_weeks=4.0):
     dbar = demand.mean()
@@ -47,12 +49,14 @@ def initial_stock(p, demand):
 
 # --------------------------------------------------------------------------
 def simulate(p, demand, nester, mode="policy", plan=None, fill=True, lot_rule="min",
-             max_weeks=3, verbose=False):
+             max_weeks=3, restes_age_max=None, verbose=False):
     """
     Roll week by week.
     mode='policy': mandatory x = smallest multiple of q meeting (C2)
     mode='plan'  : mandatory x given by a precomputed plan (DataFrame week x art)
     fill=True    : add optional pieces into free space, bounded by Smax (C4)
+    restes_age_max : None = pas de gestion des restes ; sinon nombre de semaines
+                   pendant lesquelles un reste est gardé avant d'être mis au rebut
     max_weeks    : délai max. entre le lancement de l'OF et l'utilisation des pièces.
                    Un OF lancé en semaine t est livré en t+1 (délai 1 sem. <= max_weeks) ;
                    les pièces de remplissage ne couvrent que la demande des semaines
@@ -63,6 +67,7 @@ def simulate(p, demand, nester, mode="policy", plan=None, fill=True, lot_rule="m
     S = initial_stock(p, demand).astype(float)
     weeks = demand.index[:-1]  # last week only used as "next week" demand
     rows, prod = [], {}
+    stock_r = [] if restes_age_max is not None else None
     for ti, w in enumerate(weeks):
         d_now = demand.loc[w]
         d_next = demand.iloc[ti + 1]
@@ -87,7 +92,7 @@ def simulate(p, demand, nester, mode="policy", plan=None, fill=True, lot_rule="m
             for a in cover.sort_values().index:
                 if room[a] > 0 and p.dbar[a] > 0:
                     opt[a] = int(room[a])
-        res = nester.nest(mand, opt)
+        res = nester.nest(mand, opt, restes=stock_r)
         extra = pd.Series(res["optional_cut"], dtype=float).reindex(arts).fillna(0)
         if fill and extra.sum() > 0:
             # make the filled quantities respect the OF lot rule, then re-nest
@@ -96,15 +101,20 @@ def simulate(p, demand, nester, mode="policy", plan=None, fill=True, lot_rule="m
             else:  # 'min': OF >= q ; extra can join an existing OF of the week
                 extra = extra.where((x > 0) | (extra >= p.q), 0)
             x_all = x + extra
-            res = nester.nest({a: int(v) for a, v in x_all.items() if v > 0})
+            res = nester.nest({a: int(v) for a, v in x_all.items() if v > 0}, restes=stock_r)
         x_tot = x + extra
+        rebut = 0
+        if stock_r is not None:
+            stock_r, rebut = vieillir_restes(res["restes_stock"], restes_age_max)
         S = after + x_tot
         prod[w] = x_tot
         rows.append({
             "week": w, "pieces": int(x_tot.sum()), "pieces_mand": int(x.sum()),
             "pieces_fill": int(extra.sum()), "n_OF": int((x_tot > 0).sum()),
             "panels": res["n_panels"], "tdc": res["tdc"],
-            "piece_area": res["piece_area"], "consumed_area": res["consumed_area"],
+            "piece_area": res["piece_area"], "consumed_area": res["consumed_area"] + rebut,
+            "restes_utilises": res.get("n_restes_utilises", 0),
+            "restes_en_stock": len(stock_r) if stock_r is not None else 0,
             "stock_end": float(S.sum()), "min_stock_after": float(after.min()),
             "_panels": res["panels"], "_x": x_tot,
         })

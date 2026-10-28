@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mt
 
 from .data import load_material, historical_ofs
-from .nesting import BestNester, Panel
+from .nesting import BestNester, Panel, vieillir_restes
 
 # Valeurs lues sur les graphiques Schmidt (semaine ISO -> TdC en %)
 # "global" = « Evolution du Taux de Chute par épaisseur et type d'opti à la PAM3 » (Epaisseur_16)
@@ -50,7 +50,7 @@ GRIS = "#A5A5A5"
 TEXTE = "#404040"
 
 
-def weekly_tdc(matiere):
+def weekly_tdc(matiere, restes_age_max=None):
     """TdC par semaine ISO : B0 (OF coupés par jour) et B0w (OF regroupés par semaine)."""
     mat, art = load_material(matiere)
     arts = {}
@@ -67,16 +67,28 @@ def weekly_tdc(matiere):
     of = of[of.Article.isin(arts)]
     of["sem"] = of.DateProd.dt.isocalendar().week.astype(int)
     out = {}
+    use = restes_age_max is not None
+    stock_w = [] if use else None          # stock de restes, scénario par semaine
+    stock_0 = [] if use else None          # stock de restes, scénario par jour
     for s, g in of.groupby("sem"):
         # B0w : toute la semaine en un seul lot
-        r = nester.nest(g.groupby("Article")["Qté cdée"].sum().to_dict())
+        r = nester.nest(g.groupby("Article")["Qté cdée"].sum().to_dict(), restes=stock_w)
+        ca_w = r["consumed_area"]
+        if use:
+            stock_w, reb = vieillir_restes(r["restes_stock"], restes_age_max)
+            ca_w += reb
         # B0 : un lot par jour de production
         pa = ca = 0
         for _, gd in g.groupby("DateProd"):
-            rd = nester.nest(gd.groupby("Article")["Qté cdée"].sum().to_dict())
+            rd = nester.nest(gd.groupby("Article")["Qté cdée"].sum().to_dict(), restes=stock_0)
             pa += rd["piece_area"]; ca += rd["consumed_area"]
-        out[s] = {"B0w": r["tdc"], "B0": 1 - pa / ca,
-                  "pa": r["piece_area"], "ca_w": r["consumed_area"], "ca_0": ca}
+            if use:
+                stock_0 = rd["restes_stock"]
+        if use:
+            stock_0, reb = vieillir_restes(stock_0, restes_age_max)
+            ca += reb
+        out[s] = {"B0w": 1 - r["piece_area"] / ca_w, "B0": 1 - pa / ca,
+                  "pa": r["piece_area"], "ca_w": ca_w, "ca_0": ca}
     return pd.DataFrame(out).T
 
 
@@ -193,12 +205,12 @@ def schmidt_image(matiere, path):
     return path
 
 
-def weekly_tdc_global(matieres):
+def weekly_tdc_global(matieres, restes_age_max=None):
     """TdC hebdomadaire toutes matières confondues (pondéré par la surface)."""
     tabs = []
     for m in matieres:
         try:
-            tabs.append(weekly_tdc(m))
+            tabs.append(weekly_tdc(m, restes_age_max))
         except Exception:      # matière sans OF / sans article
             pass
     t = pd.concat(tabs).groupby(level=0)[["pa", "ca_w", "ca_0"]].sum()

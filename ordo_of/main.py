@@ -33,6 +33,7 @@ SS_WEEKS = 0.5            # stock de sécurité au montage (semaines de demande)
 SMAX_WEEKS = 3.0          # stock maximum au montage (semaines de demande)
 LOT_RULE = "min"          # "min" : OF >= QteParOF ; "multiple" : OF = k x QteParOF
 MAX_DELAI_SEMAINES = 3    # délai max. entre lancement de l'OF et utilisation des pièces
+RESTES_AGE_MAX = 4        # un reste (>= ResteMin) est gardé 4 semaines au plus, puis mis au rebut
 OUT = "results"
 
 
@@ -63,7 +64,7 @@ def run():
 
     # ---------- planification hebdomadaire
     kpi, X = simulate(p, D, nester, "policy", fill=True, lot_rule=LOT_RULE,
-                      max_weeks=MAX_DELAI_SEMAINES)
+                      max_weeks=MAX_DELAI_SEMAINES, restes_age_max=RESTES_AGE_MAX)
     tdc = 1 - kpi.piece_area.sum() / kpi.consumed_area.sum()
     print(f"matière {MATIERE} : {len(X)} semaines, TdC = {tdc:.1%}, "
           f"{int(kpi.panels.sum())} panneaux, stock min. {kpi.min_stock_after.min():.0f}")
@@ -83,7 +84,9 @@ def run():
                            columns=prod.columns, index=[""])
     pan_row = pd.DataFrame([["Panneaux", ""] + list(kpi.panels.astype(int)) + [int(kpi.panels.sum())]],
                            columns=prod.columns, index=[""])
-    sheet1 = pd.concat([prod, tot, pan_row, tdc_row])
+    res_row = pd.DataFrame([["Restes réutilisés", ""] + list(kpi.restes_utilises.astype(int))
+                            + [int(kpi.restes_utilises.sum())]], columns=prod.columns, index=[""])
+    sheet1 = pd.concat([prod, tot, pan_row, res_row, tdc_row])
     sheet1.index.name = "Article"
 
     # ---------- feuille 2 : ordre de coupe (avec les dates des OF)
@@ -105,9 +108,9 @@ def run():
     tmp = tempfile.mkdtemp()
     mat_all = pd.read_excel(_p(F_ART), "Matière").dropna(subset=["Matiere"])
     graphs = [("global", "Taux de Chute – toutes matières (épaisseur 16)",
-               comparaison.weekly_tdc_global(mat_all.Matiere.astype(int)))]
+               comparaison.weekly_tdc_global(mat_all.Matiere.astype(int), RESTES_AGE_MAX))]
     for m in (215371, 221612, 220965, 219106):
-        graphs.append((m, f"TdC par Coloris – {m}", comparaison.weekly_tdc(m)))
+        graphs.append((m, f"TdC par Coloris – {m}", comparaison.weekly_tdc(m, RESTES_AGE_MAX)))
     pairs, tables = [], []
     for nom, titre, ours in graphs:
         sch = comparaison.SCHMIDT[nom]
@@ -139,7 +142,7 @@ def run():
 
         ws = xw.sheets["Production par semaine"]
         _style(ws, {"A": 10, "B": 32, "C": 10}, freeze="D2")
-        for row in ws.iter_rows(min_row=ws.max_row - 2, max_row=ws.max_row):
+        for row in ws.iter_rows(min_row=ws.max_row - 3, max_row=ws.max_row):
             for c in row:
                 c.font = Font(bold=True)
 
