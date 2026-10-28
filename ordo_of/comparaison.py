@@ -170,3 +170,18 @@ def run(out="results", matieres=(215371,)):
         for m, t in tables.items():
             t.to_excel(xw, sheet_name=str(m), index=False)
     return tables
+
+
+# position du graphique de chaque matière dans la feuille « TdC » du fichier Schmidt
+IMAGE_SCHMIDT = {215371: 1, 221612: 2, 220965: 3, 219106: 4}
+
+
+def schmidt_image(matiere, path):
+    """Extrait le graphique original Schmidt de la matière (feuille TdC) vers `path`."""
+    import openpyxl
+    from .data import _p, F_OF
+    ws = openpyxl.load_workbook(_p(F_OF))["TdC"]
+    imgs = sorted(ws._images, key=lambda im: im.anchor._from.row)
+    with open(path, "wb") as f:
+        f.write(imgs[IMAGE_SCHMIDT[matiere]]._data())
+    return path

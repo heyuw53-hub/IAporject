@@ -119,55 +119,18 @@ $N_t$ est obtenu en **imbriquant réellement** les pièces de la semaine $t$.
 
 ## 6. Résultats
 
-Les résultats sont écrits dans `results/`.
-
-**`resultats_215371.xlsx`** contient 6 feuilles :
+Un seul fichier : **`results/resultats_215371.xlsx`**, avec 3 feuilles.
 
 | Feuille | Contenu |
 |---|---|
-| Synthese | Comparaison des scénarios : TdC, panneaux, pièces, m² par panneau, nombre de lancements |
-| Horizon de regroupement | TdC des OF historiques regroupés par 1 jour, 1, 2 ou 3 semaines (3 = maximum autorisé) |
-| KPI hebdo B2 | Pour chaque semaine du scénario recommandé : pièces, pièces de remplissage, panneaux, TdC, stock, stock minimum (≥ 0 : pas de rupture), pic du stock tampon |
-| Plan OF B2 (art x sem) | Quantité à lancer par article et par semaine (livrable 3) |
-| Frequence par article | QteParOF, demande moyenne, fréquence (« 1 OF toutes les x semaines »), quantité moyenne par OF (livrable 2) |
-| TdC hebdo | TdC hebdomadaire des scénarios B1, B2 et B3 |
+| Production par semaine | Quantité à couper par article et par semaine (`2026/Sxx`), QteParOF, total ; en bas : total de pièces, panneaux et taux de chute de chaque semaine |
+| Ordre de coupe | Pour chaque semaine, les panneaux dans l'ordre de coupe : articles, n° d'OF (`2026-S02-221736-1`), pièces sur le panneau, cumul de l'OF, « oui » quand l'OF est complet et sort du stock tampon, taille de l'OF, date de lancement et date de livraison (délai 7 jours ≤ 3 semaines) |
+| Comparaison Schmidt | Graphique original Schmidt « TdC par Coloris » et notre graphique au même format (mêmes semaines), plus le tableau des valeurs |
 
-**`tdc_hebdo.png`** et **`stock_tampon.png`** sont les graphiques correspondants.
-
-**`ordre_de_coupe_215371.xlsx`** (livrable 3) contient 2 feuilles :
-
-| Feuille | Contenu |
-|---|---|
-| Liste des OF | Un OF par ligne : n° d'OF (`2026-S02-221736-1`), article, quantité (≥ QteParOF), date de lancement, date de livraison, délai (7 jours ≤ 21), premier et dernier panneau de l'OF |
-| Ordre de coupe | Pour chaque semaine, les panneaux dans l'ordre de coupe : articles, OF, pièces sur le panneau, cumul de l'OF, et « oui » quand l'OF est complet et sort du stock tampon |
-
-L'ordre de coupe est choisi pour que les OF se complètent le plus tôt possible (pic du stock tampon le plus bas).
-
-**`comparaison_schmidt/`** : comparaison avec les graphiques Schmidt « TdC par Coloris »
-
-| Fichier | Contenu |
-|---|---|
-| `TdC_par_coloris_215371_propose.png` | Même format que Schmidt (mêmes semaines, étiquettes, tendance linéaire), avec les OF historiques regroupés par semaine |
-| `comparaison_215371.png` | Courbe Schmidt et notre courbe sur le même graphique |
-| `comparaison_TdC_par_coloris.xlsx` | Les valeurs semaine par semaine |
-
-Les semaines S35 à S37 n'ont pas d'OF dans le fichier fourni : elles restent vides. Les valeurs Schmidt sont lues sur leurs graphiques.
-
-**Résultats principaux** (période commune du 20/04 au 20/07/2026)
-
-| Scénario | TdC |
-|---|---|
-| B0 – OF historiques coupés par jour (situation actuelle) | 19,7 % |
-| B0w – mêmes OF regroupés par semaine | 14,5 % |
-| B1 – lots hebdomadaires | 13,7 % |
-| **B2 – lots hebdomadaires + remplissage (délai ≤ 3 semaines)** | **13,8 %** |
-| B3 – MILP sur le modèle en surface | 14,5 % |
-
-- **Le principal levier est le regroupement hebdomadaire.** Le TdC passe de 19,1 % (1 jour) à 14,3 % (1 semaine), puis 13,9 % (2 semaines) et 13,7 % (3 semaines, le maximum autorisé) : le gain diminue au-delà d'une semaine.
-- **Avec la limite de 3 semaines, le remplissage n'apporte presque plus rien** (13,8 % contre 13,7 % pour B1) : on ne peut plus couper à l'avance des pièces nécessaires plus tard.
-- **Comparaison avec Schmidt** (S17–S42) : 20,0 % en réel contre 14,5 % avec les mêmes OF regroupés par semaine.
-- **Aucune rupture.** Le pic du stock tampon est de 1027 pièces, pour une limite de 2553.
-- **Un modèle en surface seul ne suffit pas.** Le MILP fait moins bien que la règle simple : le TdC doit être évalué par une imbrication réelle.
+**Résultats principaux**
+- Taux de chute de la méthode proposée (S02–S30) : **13,7 %**, sans rupture ; pic du stock tampon 1027 pièces (limite 2553) ; tous les OF ≥ QteParOF et délai ≤ 3 semaines.
+- Comparaison avec Schmidt sur les mêmes semaines (S17–S42) : **20,0 % en réel → 14,5 %** en regroupant les mêmes OF par semaine.
+- Les semaines S35 à S37 n'ont pas d'OF dans le fichier fourni : elles restent vides. Les valeurs Schmidt sont lues sur leurs graphiques.
 
 ## 7. Limites et suite
 
