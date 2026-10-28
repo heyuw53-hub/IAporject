@@ -11,6 +11,7 @@ OFs: the weekly quantity of an article is split into OFs of QteParOF pieces
 (last OF = remainder). Pieces of an article fill its OFs in order.
 """
 import numpy as np
+import pandas as pd
 
 CAP = 3192
 LIMIT = int(0.8 * CAP)
@@ -25,7 +26,9 @@ def split_ofs(x, q):
         if n <= 0:
             continue
         lot = max(int(q[a]), 1)
-        sizes = [lot] * (n // lot) + ([n % lot] if n % lot else [])
+        # OF >= QteParOF : le reste est ajouté au dernier OF (ex. 200 avec lot 177 -> 1 OF de 200)
+        k = max(n // lot, 1)
+        sizes = [lot] * (k - 1) + [n - lot * (k - 1)]
         ofs[a] = sizes
     return ofs
 
@@ -81,3 +84,70 @@ def week_buffer(panels, x, q, greedy=True):
     seq = sequence_greedy(panels, ofs) if greedy else panels
     curve, peak = simulate_buffer(seq, ofs)
     return curve, peak, seq
+
+
+# --------------------------------------------------------------------------
+# Ordre de coupe et liste des OF (livrable 3)
+# --------------------------------------------------------------------------
+def cutting_order(week, panels, x, q, designation, lead_days=7):
+    """
+    Ordre de coupe d'une semaine.
+      week        : lundi de la semaine (Timestamp)
+      panels      : liste {article: nb pièces} par panneau (sortie de l'imbrication)
+      x           : {article: quantité de la semaine}
+      q           : QteParOF par article
+    Renvoie (lignes_ordre, lignes_of, pic_stock_tampon)
+      lignes_ordre : 1 ligne par (panneau, article) dans l'ordre de coupe
+      lignes_of    : 1 ligne par OF (taille, panneau de début / fin, dates)
+    """
+    ofs = split_ofs(x, q)
+    # on garde l'ordre (imbrication ou glouton) qui donne le plus petit pic de stock tampon
+    seq_a = panels
+    seq_b = sequence_greedy(panels, ofs)
+    _, peak_a = simulate_buffer(seq_a, ofs)
+    _, peak_b = simulate_buffer(seq_b, ofs)
+    seq, peak = (seq_b, peak_b) if peak_b < peak_a else (seq_a, peak_a)
+
+    iso = week.isocalendar()
+    tag = f"{iso[0]}-S{iso[1]:02d}"
+    # OF identifiers: <année>-S<semaine>-<article>-<n>
+    of_list = {a: [{"OF": f"{tag}-{a}-{k + 1}", "Article": a, "Taille OF": s,
+                    "coupées": 0, "panneau début": None, "panneau fin": None}
+                   for k, s in enumerate(sizes)] for a, sizes in ofs.items()}
+    cur = {a: 0 for a in of_list}          # index of the OF being filled
+    rows = []
+    for n_pan, items in enumerate(seq, start=1):
+        for a, n in sorted(items.items()):
+            while n > 0 and a in of_list and cur[a] < len(of_list[a]):
+                of = of_list[a][cur[a]]
+                take = min(n, of["Taille OF"] - of["coupées"])
+                if of["panneau début"] is None:
+                    of["panneau début"] = n_pan
+                of["coupées"] += take
+                n -= take
+                complete = of["coupées"] >= of["Taille OF"]
+                if complete:
+                    of["panneau fin"] = n_pan
+                rows.append({
+                    "Semaine": tag, "N° panneau": n_pan, "Article": a,
+                    "Désignation": designation.get(a, ""), "OF": of["OF"],
+                    "Pièces sur ce panneau": take,
+                    "Cumul OF": f'{of["coupées"]}/{of["Taille OF"]}',
+                    "OF complet → sortie": "oui" if complete else "",
+                })
+                if complete:
+                    cur[a] += 1
+    lancement = week
+    livraison = week + pd.Timedelta(days=lead_days)
+    of_rows = []
+    for a, lst in of_list.items():
+        for of in lst:
+            of_rows.append({
+                "OF": of["OF"], "Semaine": tag, "Article": a,
+                "Désignation": designation.get(a, ""), "Quantité": of["Taille OF"],
+                "Date lancement": lancement.strftime("%Y-%m-%d"),
+                "Date livraison": livraison.strftime("%Y-%m-%d"),
+                "Délai (jours)": lead_days,
+                "Panneau début": of["panneau début"], "Panneau fin": of["panneau fin"],
+            })
+    return rows, of_rows, peak

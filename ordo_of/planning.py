@@ -47,12 +47,16 @@ def initial_stock(p, demand):
 
 # --------------------------------------------------------------------------
 def simulate(p, demand, nester, mode="policy", plan=None, fill=True, lot_rule="min",
-             verbose=False):
+             max_weeks=3, verbose=False):
     """
     Roll week by week.
     mode='policy': mandatory x = smallest multiple of q meeting (C2)
     mode='plan'  : mandatory x given by a precomputed plan (DataFrame week x art)
     fill=True    : add optional pieces into free space, bounded by Smax (C4)
+    max_weeks    : délai max. entre le lancement de l'OF et l'utilisation des pièces.
+                   Un OF lancé en semaine t est livré en t+1 (délai 1 sem. <= max_weeks) ;
+                   les pièces de remplissage ne couvrent que la demande des semaines
+                   t+1 .. t+max_weeks (jamais un besoin plus lointain).
     Returns weekly KPIs and the realised production plan.
     """
     arts = list(p.index)
@@ -74,7 +78,10 @@ def simulate(p, demand, nester, mode="policy", plan=None, fill=True, lot_rule="m
         mand = {a: int(x[a]) for a in arts if x[a] > 0}
         opt = {}
         if fill:
-            room = (p.Smax - (after + x)).clip(lower=0).astype(int)
+            # (C5) stock max  et  (C9) horizon de max_weeks semaines
+            horizon = demand.iloc[ti + 1: ti + 1 + max_weeks].sum() + p.SS
+            cap_i = np.minimum(p.Smax, horizon)
+            room = (cap_i - (after + x)).clip(lower=0).astype(int)
             # urgency: articles with the lowest future coverage first
             cover = (after + x) / p.dbar.replace(0, np.nan)
             for a in cover.sort_values().index:

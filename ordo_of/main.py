@@ -21,12 +21,15 @@ import matplotlib.pyplot as plt
 from .data import load_material, weekly_demand, historical_ofs
 from .nesting import BestNester, Panel
 from .planning import params, simulate, milp_plan
-from .sequencing import week_buffer, LIMIT
+from .sequencing import week_buffer, cutting_order, LIMIT
+from . import comparaison
 
 MATIERE = 215371
 SS_WEEKS = 0.5
 SMAX_WEEKS = 3.0
 LOT_RULE = "min"   # "min": OF >= QteParOF ; "multiple": OF = k * QteParOF
+# délai max. entre le lancement d'un OF et la livraison / l'utilisation de ses pièces
+MAX_DELAI_SEMAINES = 3
 OUT = "results"
 
 
@@ -63,7 +66,7 @@ def run():
     hor = []
     for lab, key in [("1 jour", of.DateProd), ("1 semaine", of.week),
                      ("2 semaines", of.week.dt.isocalendar().week // 2),
-                     ("4 semaines", of.week.dt.isocalendar().week // 4)]:
+                     ("3 semaines (max. autorisé)", of.week.dt.isocalendar().week // 3)]:
         pa = ca = npan = 0
         for _, g in of.groupby(key):
             r = nester.nest(g.groupby("Article")["Qté cdée"].sum().to_dict())
@@ -73,22 +76,26 @@ def run():
     print(hor.to_string(index=False))
 
     # ---------------- B1 / B2 / B3
-    b1, X1 = simulate(p, D, nester, "policy", fill=False)
-    b2, X2 = simulate(p, D, nester, "policy", fill=True, lot_rule=LOT_RULE)
+    b1, X1 = simulate(p, D, nester, "policy", fill=False, max_weeks=MAX_DELAI_SEMAINES)
+    b2, X2 = simulate(p, D, nester, "policy", fill=True, lot_rule=LOT_RULE,
+                      max_weeks=MAX_DELAI_SEMAINES)
     plan, res = milp_plan(p, D)
-    b3, X3 = simulate(p, D, nester, "plan", plan, fill=False)
+    b3, X3 = simulate(p, D, nester, "plan", plan, fill=False, max_weeks=MAX_DELAI_SEMAINES)
 
-    # ---------------- buffer for the proposed scenario
-    peaks = []
+    # ---------------- ordre de coupe, liste des OF et stock tampon (scénario proposé)
+    desig = art["Désignation article"].to_dict()
+    peaks, ordre, ofs = [], [], []
     for w, row in b2.iterrows():
         x = row["_x"][row["_x"] > 0].to_dict()
-        best = None
-        for greedy in (False, True):
-            curve, peak, _ = week_buffer(row["_panels"], x, p.q, greedy)
-            if best is None or peak < best[1]:
-                best = (curve, peak)
-        peaks.append(best[1])
+        r_ordre, r_of, peak = cutting_order(w, row["_panels"], x, p.q, desig)
+        ordre += r_ordre; ofs += r_of; peaks.append(peak)
     b2["buffer_peak"] = peaks
+    ofs = pd.DataFrame(ofs)
+    assert (ofs["Délai (jours)"] <= 7 * MAX_DELAI_SEMAINES).all()
+    with pd.ExcelWriter(os.path.join(OUT, f"ordre_de_coupe_{MATIERE}.xlsx")) as xw:
+        ofs.to_excel(xw, sheet_name="Liste des OF", index=False)
+        pd.DataFrame(ordre).to_excel(xw, sheet_name="Ordre de coupe", index=False)
+    print(f"{len(ofs)} OF, {len(ordre)} lignes d'ordre de coupe")
 
     # ---------------- synthesis (full period and window common with history)
     common = b1.index.intersection(b0.index)
@@ -158,6 +165,8 @@ def run():
     ax.axhline(LIMIT, color="r", ls="--", label="80 % de 3192")
     ax.set_ylabel("Pic stock tampon (pièces)"); ax.legend(); fig.autofmt_xdate(); fig.tight_layout()
     fig.savefig(os.path.join(OUT, "stock_tampon.png"), dpi=150)
+    # ---------------- comparaison avec les graphiques Schmidt « TdC par Coloris »
+    comparaison.run(OUT, matieres=(MATIERE,))
     return syn
 
 
