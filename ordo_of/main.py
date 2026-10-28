@@ -116,7 +116,10 @@ def run():
         y0 = [ours.B0.get(w, np.nan) * 100 for w in weeks]
         img_s = comparaison.schmidt_image(nom, os.path.join(tmp, f"schmidt_{nom}.png"))
         img_n = os.path.join(tmp, f"nous_{nom}.png")
-        comparaison.chart_nous(nom, weeks, ys, y0, img_n, titre)
+        # semaines sans donnée retirées de l'axe -> courbe continue (comme Schmidt)
+        k = [i for i, v in enumerate(ys) if not np.isnan(v)]
+        comparaison.chart_nous(nom, [weeks[i] for i in k], [ys[i] for i in k],
+                               [y0[i] for i in k], img_n, titre)
         pairs.append((titre, img_s, img_n))
         ok = ~np.isnan(ys)
         tables.append(pd.DataFrame({
