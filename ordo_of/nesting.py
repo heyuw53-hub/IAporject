@@ -65,13 +65,14 @@ class Nester:
         """articles: dict art -> (X, Y, SensFil)"""
         self.panel = panel or Panel()
         self.opt_weight = opt_weight
-        self.dims, self.area = {}, {}
+        self.dims, self.area, self.orients = {}, {}, {}
         P = self.panel
         for a, (X, Y, s) in articles.items():
             o = [d for d in orient(int(X), int(Y), s) if d[0] <= P.Lu and d[1] <= P.Wu]
             if not o:
                 raise ValueError(f"article {a} does not fit the panel")
-            self.dims[a] = min(o, key=lambda d: d[1])
+            self.dims[a] = min(o, key=lambda d: d[1])   # orientation la plus étroite
+            self.orients[a] = o                           # toutes les orientations permises
             self.area[a] = int(X) * int(Y)
 
     # ------------------------------------------------------------ strip pattern
@@ -84,24 +85,25 @@ class Nester:
             for a, n in pool.items():
                 if n <= 0:
                     continue
-                l, w = self.dims[a]
-                if w > h:
-                    continue
-                m = (h + k) // (w + k)              # pieces per column
-                full, part = divmod(n, m)
-                wt = -(-(l + k) // g)               # ceil
-                if full:
-                    # binary splitting of `full` identical columns
-                    c = 1
-                    while full > 0:
-                        t = min(c, full)
-                        items.append((wt * t, wgt * self.area[a] * m * t, pool, a, m * t))
-                        full -= t
-                        c *= 2
-                if part:
-                    items.append((wt, wgt * self.area[a] * part, pool, a, part))
+                # pièce sans fil : les deux orientations sont proposées au sac à dos
+                for l, w in self.orients[a]:
+                    if w > h:
+                        continue
+                    m = (h + k) // (w + k)              # pieces per column
+                    full, part = divmod(n, m)
+                    wt = -(-(l + k) // g)               # ceil
+                    if full:
+                        # binary splitting of `full` identical columns
+                        c = 1
+                        while full > 0:
+                            t = min(c, full)
+                            items.append((wt * t, wgt * self.area[a] * m * t, pool, a, m * t, w))
+                            full -= t
+                            c *= 2
+                    if part:
+                        items.append((wt, wgt * self.area[a] * part, pool, a, part, w))
         if not items:
-            return {}
+            return {}, 0
         best = np.zeros(cap + 1)
         take = np.zeros((len(items), cap + 1), dtype=bool)
         for j, (wt, val, *_ ) in enumerate(items):
@@ -113,14 +115,19 @@ class Nester:
             take[j] = better
             best = np.where(better, cand, best)
         c = int(np.argmax(best))
-        pat = {}
+        pat, h_used, avail = {}, 0, {}
         for j in range(len(items) - 1, -1, -1):
             if take[j, c]:
-                wt, _, pool, a, npc = items[j]
+                wt, _, pool, a, npc, w = items[j]
                 key = (id(pool), a)
-                pat[key] = pat.get(key, 0) + npc
+                # deux orientations du même article : ne pas dépasser la quantité restante
+                avail.setdefault(key, pool[a])
+                npc = min(npc, avail[key] - pat.get(key, 0))
+                if npc > 0:
+                    pat[key] = pat.get(key, 0) + npc
+                    h_used = max(h_used, w)
                 c -= wt
-        return pat
+        return pat, h_used
 
     def _strips(self, mand, opt, only_opt_h=None):
         """Generate strips; returns list of (h, {art: n}, piece_area)."""
@@ -132,9 +139,9 @@ class Nester:
                 if not rem:
                     break
                 h = max(self.dims[a][1] for a in rem)
-                pat = self._pattern(h, mand, opt)
+                pat, h_used = self._pattern(h, mand, opt)
                 if not any(pid == id(mand) for pid, _ in pat):
-                    pat = self._pattern(h, mand, {})  # guarantee progress
+                    pat, h_used = self._pattern(h, mand, {})  # guarantee progress
             else:
                 return out
             # pieces actually used, and how many times the pattern can repeat
@@ -146,8 +153,7 @@ class Nester:
                 content[a] = content.get(a, 0) + n
                 parea += n * self.area[a]
             # real strip height = widest piece used
-            h_real = max(self.dims[a][1] for a in content)
-            out.extend([(h_real, content, parea)] * reps)
+            out.extend([(h_used, content, parea)] * reps)
         return out
 
     def _fill_height(self, rem_h, opt):
@@ -157,10 +163,10 @@ class Nester:
             return None
         best = None
         for h in sorted({self.dims[a][1] for a in cands}, reverse=True)[:4]:
-            pat = self._pattern(h, {}, opt)
+            pat, h_used = self._pattern(h, {}, opt)
             val = sum(n * self.area[a] for (_, a), n in pat.items())
-            if pat and (best is None or val / h > best[0]):
-                best = (val / h, h, pat)
+            if pat and (best is None or val / h_used > best[0]):
+                best = (val / h_used, h_used, pat)
         if not best:
             return None
         _, h, pat = best
@@ -169,7 +175,7 @@ class Nester:
             opt[a] -= n
             content[a] = content.get(a, 0) + n
             parea += n * self.area[a]
-        return (max(self.dims[a][1] for a in content), content, parea)
+        return (h, content, parea)
 
     # ------------------------------------------------------------------- panels
     def nest(self, mandatory, optional=None):
@@ -240,6 +246,10 @@ class BestNester:
         self.n_wid = Nester.__new__(Nester)
         self.n_wid.panel, self.n_wid.opt_weight = pt, opt_weight
         self.n_wid.dims = {a: (w, l) for a, (l, w) in self.n_len.dims.items()}
+        self.n_wid.orients = {a: [(w, l) for l, w in o] for a, o in self.n_len.orients.items()}
+        for a, o in self.n_wid.orients.items():   # orientations qui tiennent dans le panneau
+            self.n_wid.orients[a] = [d for d in o if d[0] <= pt.Lu and d[1] <= pt.Wu] or o
+            self.n_wid.dims[a] = min(self.n_wid.orients[a], key=lambda d: d[1])
         self.n_wid.area = self.n_len.area
         self.area, self.dims = self.n_len.area, self.n_len.dims
 

@@ -21,7 +21,12 @@ from .data import load_material, historical_ofs
 from .nesting import BestNester, Panel
 
 # Valeurs lues sur les graphiques Schmidt (semaine ISO -> TdC en %)
+# "global" = « Evolution du Taux de Chute par épaisseur et type d'opti à la PAM3 » (Epaisseur_16)
 SCHMIDT = {
+    "global": {17: 16.08, 18: 14.02, 19: 17.01, 20: 16.96, 21: 15.98, 22: 14.10, 23: 17.40,
+               24: 18.10, 25: 15.99, 26: 17.01, 27: 16.43, 28: 14.57, 29: 17.94, 30: 16.33,
+               31: 17.24, 34: 16.53, 35: 15.00, 36: 16.08, 37: 17.25, 38: 14.43, 39: 14.91,
+               40: 13.58, 41: 14.61, 42: 19.01},
     215371: {17: 17.13, 18: 17.40, 19: 20.67, 20: 20.47, 21: 20.40, 22: 16.02, 23: 22.15,
              24: 24.27, 25: 20.35, 26: 21.54, 27: 20.20, 28: 18.61, 29: 18.78, 30: 21.19,
              31: 22.72, 35: 18.86, 36: 17.62, 37: 22.38, 38: 21.78, 39: 17.57, 40: 14.86,
@@ -70,7 +75,8 @@ def weekly_tdc(matiere):
         for _, gd in g.groupby("DateProd"):
             rd = nester.nest(gd.groupby("Article")["Qté cdée"].sum().to_dict())
             pa += rd["piece_area"]; ca += rd["consumed_area"]
-        out[s] = {"B0w": r["tdc"], "B0": 1 - pa / ca}
+        out[s] = {"B0w": r["tdc"], "B0": 1 - pa / ca,
+                  "pa": r["piece_area"], "ca_w": r["consumed_area"], "ca_0": ca}
     return pd.DataFrame(out).T
 
 
@@ -173,7 +179,7 @@ def run(out="results", matieres=(215371,)):
 
 
 # position du graphique de chaque matière dans la feuille « TdC » du fichier Schmidt
-IMAGE_SCHMIDT = {215371: 1, 221612: 2, 220965: 3, 219106: 4}
+IMAGE_SCHMIDT = {"global": 0, 215371: 1, 221612: 2, 220965: 3, 219106: 4}
 
 
 def schmidt_image(matiere, path):
@@ -185,3 +191,33 @@ def schmidt_image(matiere, path):
     with open(path, "wb") as f:
         f.write(imgs[IMAGE_SCHMIDT[matiere]]._data())
     return path
+
+
+def weekly_tdc_global(matieres):
+    """TdC hebdomadaire toutes matières confondues (pondéré par la surface)."""
+    tabs = []
+    for m in matieres:
+        try:
+            tabs.append(weekly_tdc(m))
+        except Exception:      # matière sans OF / sans article
+            pass
+    t = pd.concat(tabs).groupby(level=0)[["pa", "ca_w", "ca_0"]].sum()
+    return pd.DataFrame({"B0w": 1 - t.pa / t.ca_w, "B0": 1 - t.pa / t.ca_0})
+
+
+def chart_nous(nom, weeks, y_semaine, y_jour, path, titre):
+    """Notre graphique, au format Schmidt (mêmes semaines, étiquettes, tendance linéaire).
+    Bleu : OF regroupés par semaine ; gris fin : mêmes OF coupés par jour (notre recalcul)."""
+    labels = [f"2026/S{w}" for w in weeks]
+    fig, ax = plt.subplots(figsize=(19.5, 6.2))
+    yj = np.array(y_jour, float)
+    ax.plot(np.arange(len(yj)), yj, color=GRIS, lw=1.6, label="OF coupés par jour (recalcul)")
+    _serie(ax, np.array(y_semaine, float), BLEU, "OF regroupés par semaine")
+    _axes_style(ax, labels, list(y_semaine) + list(y_jour))
+    ax.set_title(titre, fontsize=17, color="#595959", pad=18)
+    ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.55), frameon=False, fontsize=11,
+              title="Epaisseur_16" if nom == "global" else str(nom), title_fontsize=11,
+              alignment="left")
+    fig.tight_layout()
+    fig.savefig(path, dpi=100)
+    plt.close(fig)

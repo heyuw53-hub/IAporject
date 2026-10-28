@@ -6,7 +6,8 @@ Programme principal : produit un seul fichier  results/resultats_<matière>.xlsx
 Feuilles :
   1. Production par semaine : quantité à couper par article et par semaine
   2. Ordre de coupe         : panneaux dans l'ordre de coupe, avec les OF et leurs dates
-  3. Comparaison Schmidt    : graphique Schmidt original + notre graphique au même format
+  3. Comparaison Schmidt    : les 5 graphiques Schmidt originaux (gauche) et les nôtres
+                              au même format et aux mêmes semaines (droite) + tableau
                               + tableau des valeurs
 
 Méthode retenue : lots hebdomadaires (OF = besoin de la semaine suivante + stock de
@@ -21,7 +22,7 @@ import pandas as pd
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Font, PatternFill, Alignment
 
-from .data import load_material, weekly_demand
+from .data import load_material, weekly_demand, _p, F_ART
 from .nesting import BestNester, Panel
 from .planning import params, simulate
 from .sequencing import cutting_order, LIMIT
@@ -100,33 +101,38 @@ def run():
     sheet2["Semaine"] = sheet2["Semaine"].str.replace("-", "/")
     print(f"{len(ofs)} OF, pic du stock tampon {max(peaks):.0f} (limite {LIMIT})")
 
-    # ---------- feuille 3 : comparaison avec Schmidt
+    # ---------- feuille 3 : comparaison avec Schmidt (graphiques côte à côte)
     tmp = tempfile.mkdtemp()
-    sch = comparaison.SCHMIDT[MATIERE]
-    weeks = list(sch)
-    ours = comparaison.weekly_tdc(MATIERE)
-    y_nous = [ours.B0w.get(s, np.nan) * 100 for s in weeks]
-    img_schmidt = comparaison.schmidt_image(MATIERE, os.path.join(tmp, "schmidt.png"))
-    img_nous = os.path.join(tmp, "nous.png")
-    comparaison.chart_format_schmidt(MATIERE, weeks, y_nous, img_nous)
-    sheet3 = pd.DataFrame({
-        "Semaine": [f"2026/S{s}" for s in weeks],
-        "TdC Schmidt (%)": [sch[s] for s in weeks],
-        "TdC OF regroupés par semaine (%)": np.round(y_nous, 2),
-    })
-    ok = ~np.isnan(y_nous)
-    moy = pd.DataFrame({"Semaine": ["Moyenne (semaines communes)"],
-                        "TdC Schmidt (%)": [round(np.mean(sheet3["TdC Schmidt (%)"][ok]), 2)],
-                        "TdC OF regroupés par semaine (%)": [round(np.nanmean(y_nous), 2)]})
-    sheet3 = pd.concat([sheet3, moy], ignore_index=True)
-    print(f"comparaison Schmidt : {moy.iloc[0, 1]} % -> {moy.iloc[0, 2]} %")
+    mat_all = pd.read_excel(_p(F_ART), "Matière").dropna(subset=["Matiere"])
+    graphs = [("global", "Taux de Chute – toutes matières (épaisseur 16)",
+               comparaison.weekly_tdc_global(mat_all.Matiere.astype(int)))]
+    for m in (215371, 221612, 220965, 219106):
+        graphs.append((m, f"TdC par Coloris – {m}", comparaison.weekly_tdc(m)))
+    pairs, tables = [], []
+    for nom, titre, ours in graphs:
+        sch = comparaison.SCHMIDT[nom]
+        weeks = list(sch)                          # uniquement les semaines Schmidt
+        ys = [ours.B0w.get(w, np.nan) * 100 for w in weeks]
+        y0 = [ours.B0.get(w, np.nan) * 100 for w in weeks]
+        img_s = comparaison.schmidt_image(nom, os.path.join(tmp, f"schmidt_{nom}.png"))
+        img_n = os.path.join(tmp, f"nous_{nom}.png")
+        comparaison.chart_nous(nom, weeks, ys, y0, img_n, titre)
+        pairs.append((titre, img_s, img_n))
+        ok = ~np.isnan(ys)
+        tables.append(pd.DataFrame({
+            "Graphique": titre, "Semaine": [f"2026/S{w}" for w in weeks],
+            "TdC Schmidt (%)": [sch[w] for w in weeks],
+            "Notre recalcul, OF coupés par jour (%)": np.round(y0, 2),
+            "OF regroupés par semaine (%)": np.round(ys, 2)}))
+        print(f"{titre:45s} Schmidt {np.mean(np.array([sch[w] for w in weeks])[ok]):5.2f} %"
+              f" | recalcul par jour {np.nanmean(y0):5.2f} % | par semaine {np.nanmean(ys):5.2f} %")
+    sheet3 = pd.concat(tables, ignore_index=True)
 
     # ---------- écriture
     path = os.path.join(OUT, f"resultats_{MATIERE}.xlsx")
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         sheet1.to_excel(xw, sheet_name="Production par semaine")
         sheet2.to_excel(xw, sheet_name="Ordre de coupe", index=False)
-        sheet3.to_excel(xw, sheet_name="Comparaison Schmidt", index=False)
 
         ws = xw.sheets["Production par semaine"]
         _style(ws, {"A": 10, "B": 32, "C": 10}, freeze="D2")
@@ -139,19 +145,29 @@ def run():
                     "H": 12, "I": 9, "J": 14, "K": 14}, freeze="A2")
         ws.auto_filter.ref = ws.dimensions
 
-        ws = xw.sheets["Comparaison Schmidt"]
-        _style(ws, {"A": 26, "B": 15, "C": 18}, freeze="A2")
-        ws["E1"] = "Schmidt – TdC réel (graphique original)"
-        ws["E1"].font = Font(bold=True, size=12)
-        im = XLImage(img_schmidt); im.width, im.height = 1300, 410
-        ws.add_image(im, "E2")
-        ws["E24"] = "Proposé – mêmes OF regroupés par semaine (même format)"
-        ws["E24"].font = Font(bold=True, size=12)
-        im = XLImage(img_nous); im.width, im.height = 1300, 413
-        ws.add_image(im, "E25")
-        n = len(sheet3) + 3
-        ws[f"A{n}"] = "Semaines S35 à S37 : pas d'OF dans le fichier fourni."
-        ws[f"A{n + 1}"] = "Valeurs Schmidt lues sur leur graphique."
+        # feuille 3 : graphiques Schmidt (gauche) et les nôtres (droite), puis le tableau
+        ws = xw.book.create_sheet("Comparaison Schmidt")
+        ws["A1"] = "Schmidt (original)"; ws["J1"] = "Notre calcul (mêmes OF, mêmes semaines)"
+        ws["A1"].font = ws["J1"].font = Font(bold=True, size=13)
+        W, H, STEP = 960, 304, 18                  # taille des images (px), lignes par bloc
+        for i, (titre, img_s, img_n) in enumerate(pairs):
+            r = 3 + i * STEP
+            ws[f"A{r - 1}"] = titre
+            ws[f"A{r - 1}"].font = Font(bold=True)
+            for img, col in ((img_s, "A"), (img_n, "J")):   # A–E = 774 px, J commence à ~1030 px
+                im = XLImage(img); im.width, im.height = W, H
+                ws.add_image(im, f"{col}{r}")
+        r0 = 3 + len(pairs) * STEP + 1
+        ws.cell(r0 - 1, 1, "Valeurs (semaines S35–S37 : pas d'OF dans le fichier fourni ; "
+                           "valeurs Schmidt lues sur leurs graphiques)").font = Font(italic=True)
+        for j, col in enumerate(sheet3.columns, start=1):
+            c = ws.cell(r0, j, col); c.font = Font(bold=True)
+            c.fill = PatternFill("solid", fgColor="DDEBF7")
+        for i, row in enumerate(sheet3.itertuples(index=False), start=1):
+            for j, v in enumerate(row, start=1):
+                ws.cell(r0 + i, j, None if isinstance(v, float) and np.isnan(v) else v)
+        for col, w in {"A": 44, "B": 11, "C": 14, "D": 20, "E": 18}.items():
+            ws.column_dimensions[col].width = w
     print("écrit :", path)
     return path
 

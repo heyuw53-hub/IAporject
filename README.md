@@ -125,7 +125,7 @@ Un seul fichier : **`results/resultats_215371.xlsx`**, avec 3 feuilles.
 |---|---|
 | Production par semaine | Quantité à couper par article et par semaine (`2026/Sxx`), QteParOF, total ; en bas : total de pièces, panneaux et taux de chute de chaque semaine |
 | Ordre de coupe | Pour chaque semaine, les panneaux dans l'ordre de coupe : articles, n° d'OF (`2026-S02-221736-1`), pièces sur le panneau, cumul de l'OF, « oui » quand l'OF est complet et sort du stock tampon, taille de l'OF, date de lancement et date de livraison (délai 7 jours ≤ 3 semaines) |
-| Comparaison Schmidt | Graphique original Schmidt « TdC par Coloris » et notre graphique au même format (mêmes semaines), plus le tableau des valeurs |
+| Comparaison Schmidt | Les 5 graphiques Schmidt originaux (toutes matières, 215371, 221612, 220965, 219106) à gauche ; à droite, notre graphique au même format et aux mêmes semaines (bleu : OF regroupés par semaine ; gris : mêmes OF coupés par jour, notre recalcul) ; tableau des valeurs en dessous |
 
 **Résultats principaux**
 - Taux de chute de la méthode proposée (S02–S30) : **13,7 %**, sans rupture ; pic du stock tampon 1027 pièces (limite 2553) ; tous les OF ≥ QteParOF et délai ≤ 3 semaines.
