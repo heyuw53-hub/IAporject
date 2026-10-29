@@ -2,9 +2,11 @@
 
 École d'automne de l'IA 2026 (Alsace Tech, 26–29 octobre) · Projet Schmidt-Groupe
 
-Outil Python qui génère les OF d'une matière **semaine par semaine** : quantité à produire par composant, fréquence de commande et ordre de coupe. L'objectif est de **minimiser le taux de chute (TdC)** sans rupture à l'atelier de montage.
+Outil Python qui génère, **semaine par semaine**, les OF d'une matière : quantité à couper par article, ordre de coupe des panneaux et comparaison avec le taux de chute (TdC) réel de Schmidt. L'objectif est de **réduire le TdC sans rupture au montage**.
 
-Version 1 : une seule matière, **215371 CHENE HONEY** (55 articles, environ 56 % des pièces et 62 % des m²), avec un pas de temps d'**une semaine**.
+Périmètre : matière **215371 CHENE HONEY** (55 articles, environ la moitié des m² coupés en épaisseur 16), pas de temps d'**une semaine**.
+
+**Livrable : un seul fichier Excel, `results/resultats_215371.xlsx`, à 3 feuilles.**
 
 ---
 
@@ -13,138 +15,106 @@ Version 1 : une seule matière, **215371 CHENE HONEY** (55 articles, environ 56 
 ```
 IAporject/
 ├── run.py              ← le seul fichier à lancer
-├── requirements.txt    bibliothèques nécessaires
+├── requirements.txt
 ├── README.md
 ├── ordo_of/            code (ne pas lancer ces fichiers un par un)
-│   ├── __init__.py
 │   ├── data.py         lecture des fichiers Excel, demande hebdomadaire
-│   ├── nesting.py      imbrication : nombre de panneaux et TdC d'un lot
-│   ├── planning.py     planification hebdomadaire des lots (+ MILP de comparaison)
-│   ├── sequencing.py   ordre de coupe, liste des OF, simulation du stock tampon
+│   ├── nesting.py      imbrication des pièces sur les panneaux, gestion des restes
+│   ├── planning.py     quantité à couper par article et par semaine
+│   ├── sequencing.py   ordre de coupe, liste des OF, stock tampon
 │   ├── comparaison.py  graphiques au format Schmidt « TdC par Coloris »
-│   └── main.py         scénarios, tableaux de résultats, graphiques
+│   └── main.py         paramètres et écriture du fichier Excel
 ├── data/               ← y déposer les 3 fichiers Excel de Schmidt (non versionnés)
-└── results/            créé automatiquement à l'exécution
+└── results/            créé à l'exécution
 ```
 
-## 2. Installation et lancement
+## 2. Lancement
 
-1. Installer Python 3.10 ou une version plus récente, puis les bibliothèques (une seule fois) :
-   ```
-   pip install -r requirements.txt
-   ```
-2. Copier les trois fichiers Excel dans `data/`. Le nom exact n'a pas d'importance : chaque fichier est retrouvé par mot-clé.
+1. Installer les bibliothèques (une seule fois) : `pip install -r requirements.txt`
+2. Copier les trois fichiers Excel de Schmidt dans `data/`. Ils sont retrouvés par mot-clé : `articles`, `OFs`, `Mouvements`.
+3. Lancer `run.py` : F5 dans IDLE, ou `python run.py` depuis le dossier `IAporject`.
 
-   | Fichier | Mot-clé |
-   |---|---|
-   | Données articles et matières | `articles` |
-   | OFs et TdC | `OFs` |
-   | Mouvements de stock montage | `Mouvements` |
+Durée : environ 30 secondes (plus une minute la première fois, pour lire le fichier des mouvements).
 
-3. Lancer le programme :
-   - **avec IDLE** : ouvrir `run.py`, puis appuyer sur F5 ;
-   - **en terminal**, depuis le dossier `IAporject` : `python run.py`.
+Erreurs fréquentes :
 
-Durée d'exécution : environ 15 secondes, plus une minute la première fois, le temps de lire le fichier des mouvements (il est ensuite mis en cache dans `mouv.pkl`).
-
-**Erreurs fréquentes**
-- `attempted relative import` : un fichier de `ordo_of/` a été lancé directement. Il faut lancer `run.py`.
-- `FileNotFoundError` : les fichiers Excel ne sont pas dans `data/`. On peut aussi indiquer leur dossier dans la variable d'environnement `ORDO_DATA`.
+1. `attempted relative import` : un fichier de `ordo_of/` a été lancé directement ; il faut lancer `run.py`.
+2. `FileNotFoundError` : les fichiers Excel ne sont pas dans `data/` (ou indiquer leur dossier dans la variable d'environnement `ORDO_DATA`).
 
 ## 3. Paramètres
 
-Les paramètres se trouvent en haut de `ordo_of/main.py`.
+En haut de `ordo_of/main.py` :
 
 | Paramètre | Valeur | Signification |
 |---|---|---|
 | `MATIERE` | 215371 | Matière étudiée |
-| `SS_WEEKS` | 0.5 | Stock de sécurité au montage, en semaines de demande |
-| `SMAX_WEEKS` | 3.0 | Stock maximum au montage, en semaines de demande |
-| `LOT_RULE` | `"min"` | `"min"` : OF ≥ QteParOF ; `"multiple"` : OF = k × QteParOF |
-| `MAX_DELAI_SEMAINES` | 3 | Délai maximum entre le lancement d'un OF et sa livraison / l'utilisation de ses pièces |
-| `SEUIL_VOLUME` | 0.5 | Comparaison Schmidt : une semaine est ignorée si l'historique d'OF contient moins de 50 % du volume médian de la matière (extraction incomplète) |
-| `RESTES_AGE_MAX` | 4 | Une zone libre ≥ ResteMin (800 × 800 mm) devient un reste ; il est réutilisé en priorité les semaines suivantes, puis mis au rebut après 4 semaines |
+| `SS_WEEKS` | 0.5 | Stock de sécurité au montage (semaines de demande) |
+| `SMAX_WEEKS` | 3.0 | Stock maximum au montage (semaines de demande) |
+| `LOT_RULE` | `"min"` | OF ≥ QteParOF (`"multiple"` : OF = k × QteParOF) |
+| `MAX_DELAI_SEMAINES` | 3 | Délai maximum entre le lancement d'un OF et l'utilisation de ses pièces |
+| `RESTES_AGE_MAX` | 4 | Durée de conservation d'un reste avant mise au rebut (semaines) |
+| `SEUIL_VOLUME` | 0.5 | Comparaison : semaine écartée si son historique d'OF est sous 50 % du volume médian |
 
-## 4. Modèle mathématique
+## 4. Méthode
 
-**Indices**
-- $i$ : article
-- $t$ : semaine
+### 4.1 Données utilisées
 
-**Données**
-- $d_{i,t}$ : demande, issue des mouvements de stock (consommation + rebut)
-- $q_i$ : QteParOF
-- $a_i = X_iY_i$ : surface de l'article
-- $A$ : surface d'un panneau
+| Fichier Schmidt | Contenu utilisé | Usage |
+|---|---|---|
+| Mouvements de stock montage | Consommation + rebut, par semaine (janv.–juil. 2026) | Demande hebdomadaire par article |
+| Données articles et matières | Dimensions, sens du fil, QteParOF ; panneau, reste minimum | Géométrie, taille des OF |
+| OFs et TdC | OF historiques (avr.–oct. 2026), graphiques de TdC | Situation actuelle, comparaison avec Schmidt |
 
-**Variables**
-- $x_{i,t}$ : quantité coupée en semaine $t$
-- $S_{i,t}$ : stock au montage
-- $N_t$ : nombre de panneaux
+### 4.2 Quantité à couper chaque semaine (`planning.py`)
 
-**Objectif**
+On rejoue l'historique semaine par semaine. Ce qui est coupé en semaine t est livré au montage en t+1.
 
-$$\min \sum_t N_t \quad\Longleftrightarrow\quad \min\ \text{TdC} = 1-\frac{\sum_{i,t} a_i x_{i,t}}{A\sum_t N_t}$$
+1. **Quantité obligatoire** : demande de la semaine suivante + stock de sécurité − stock restant, arrondie au multiple supérieur de QteParOF.
+2. **Imbrication de toute la semaine** en une fois, et non jour par jour ou OF par OF.
+3. **Remplissage** (glouton) : les vides des panneaux déjà ouverts reçoivent des pièces nécessaires dans les 3 semaines suivantes, sans ouvrir de panneau ni dépasser le stock maximum.
+4. **Restes** : toute zone libre ≥ 800 × 800 mm est stockée et utilisée en priorité les semaines suivantes ; après 4 semaines sans usage, elle est mise au rebut et comptée comme chute.
 
-**Contraintes** (délai d'une semaine : ce qui est coupé en $t$ est disponible en $t+1$)
+### 4.3 Ordre de coupe (`sequencing.py`)
 
-| Contrainte | Expression |
-|---|---|
-| Bilan de stock | $S_{i,t+1} = S_{i,t} - d_{i,t} + x_{i,t}$ |
-| Pas de rupture | $S_{i,t} - d_{i,t} \ge 0$ |
-| Couverture de la semaine suivante | $S_{i,t+1} \ge d_{i,t+1} + S_s$ |
-| Taille d'OF | $x_{i,t} = 0$ ou $x_{i,t} \ge q_i$ |
-| Stock maximum | $S_{i,t+1} \le S_M$ |
-| Stock tampon | pic ≤ 80 % × 3192 = 2553 pièces |
-| Délai commande → livraison | ≤ 3 semaines : un OF lancé en $t$ est livré en $t+1$, et les pièces de remplissage ne couvrent que la demande de $t+1$ à $t+3$ |
-| Coupe | sens du fil, trait de scie 4,4 mm, coupe de propreté 21 mm, chute réutilisable ≥ 800 × 800 mm |
+1. Les quantités de la semaine sont découpées en OF (≥ QteParOF, le reliquat est ajouté au dernier OF).
+2. Règle gloutonne : on coupe d'abord le panneau dont la plus grande part des pièces appartient à des articles déjà commencés, pour compléter les OF au plus tôt.
+3. Le stock tampon est simulé pièce par pièce (entrée 2, sortie 3, un OF sort quand il est complet) ; on garde l'ordre (imbrication ou glouton) qui donne le pic le plus bas.
 
-$N_t$ est obtenu en **imbriquant réellement** les pièces de la semaine $t$.
+### 4.4 Comparaison avec Schmidt (`comparaison.py`)
 
-## 5. Méthode
+1. Les mêmes OF historiques sont imbriqués deux fois : coupés **par jour** (recalcul de la situation actuelle) et **regroupés par semaine**. Les dates de livraison ne changent pas.
+2. Seules les semaines présentes sur les graphiques Schmidt sont tracées ; les semaines à historique incomplet (ex. S17, début de l'extraction) ou sans OF (S35–S37) sont retirées.
+3. Les valeurs Schmidt sont lues sur leurs graphiques (5 graphiques : toutes matières, 215371, 221612, 220965, 219106).
 
-1. **Imbrication** (`nesting.py`) : coupe guillotine en 3 étapes (bandes, puis colonnes, puis pièces).
-   - Les pièces de chaque bande sont choisies par un sac à dos en programmation dynamique, sur une grille de 1 mm.
-   - Un même motif est répété tant que les quantités le permettent.
-   - Les bandes sont rangées dans les panneaux par First Fit Decreasing.
-   - On essaie la première coupe dans les deux sens (longueur et largeur) et on garde la meilleure.
-   - Les pièces à fil ne pivotent pas.
-2. **Planification** (`planning.py`) : on avance semaine par semaine.
-   - Lot obligatoire : le plus petit multiple de QteParOF qui couvre la semaine suivante plus le stock de sécurité.
-   - **Remplissage** : les vides des panneaux déjà ouverts reçoivent des pièces nécessaires plus tard, sans ouvrir de nouveau panneau et sans dépasser le stock maximum.
-   - Un MILP (scipy/HiGHS) sur un modèle en surface est fourni à titre de comparaison.
-3. **Séquencement** (`sequencing.py`) : les quantités sont découpées en OF de QteParOF pièces, puis le stock tampon est simulé pièce par pièce.
-   - Entrée : 2 pièces ; sortie : 3 pièces.
-   - Un OF ne sort que lorsqu'il est complet.
-
-**Validation de l'imbrication** : appliquée aux OF historiques coupés jour par jour, elle donne un TdC de 19,7 %. Le TdC réel de la matière 215371 est d'environ 20 %.
-
-## 6. Résultats
-
-Un seul fichier : **`results/resultats_215371.xlsx`**, avec 3 feuilles.
+## 5. Résultat : `results/resultats_215371.xlsx`
 
 | Feuille | Contenu |
 |---|---|
-| Production par semaine | Quantité à couper par article et par semaine (`2026/Sxx`), QteParOF, total ; en bas : total de pièces, panneaux et taux de chute de chaque semaine |
-| Ordre de coupe | Pour chaque semaine, les panneaux dans l'ordre de coupe : articles, n° d'OF (`2026-S02-221736-1`), pièces sur le panneau, cumul de l'OF, « oui » quand l'OF est complet et sort du stock tampon, taille de l'OF, date de lancement et date de livraison (délai 7 jours ≤ 3 semaines) |
-| Comparaison Schmidt | Les 5 graphiques Schmidt originaux (toutes matières, 215371, 221612, 220965, 219106) à gauche ; à droite, notre graphique au même format et aux mêmes semaines (bleu : OF regroupés par semaine ; gris : mêmes OF coupés par jour, notre recalcul) ; tableau des valeurs en dessous |
+| Production par semaine | Quantité à couper par article et par semaine (`2026/Sxx`), QteParOF, total ; en bas : pièces, panneaux, restes réutilisés et TdC de chaque semaine |
+| Ordre de coupe | Pour chaque semaine, les panneaux dans l'ordre de coupe : article, n° d'OF (`2026-S03-221737-1`), pièces sur le panneau, cumul de l'OF, « oui » quand l'OF est complet, taille de l'OF, dates de lancement et de livraison |
+| Comparaison Schmidt | Les 5 graphiques Schmidt (à gauche) et les nôtres au même format (à droite), puis le tableau des valeurs |
 
-**Résultats principaux**
-- Taux de chute de la méthode proposée (S02–S30) : **13,7 %**, sans rupture ; pic du stock tampon 1027 pièces (limite 2553) ; tous les OF ≥ QteParOF et délai ≤ 3 semaines.
-- Comparaison avec Schmidt sur les mêmes semaines (S17–S42) : **20,0 % en réel → 14,5 %** en regroupant les mêmes OF par semaine.
-- Les semaines S35 à S37 n'ont pas d'OF dans le fichier fourni : elles restent vides. Les valeurs Schmidt sont lues sur leurs graphiques.
+**Synthèse des résultats**
 
-## 7. Limites et suite
+1. Matière 215371, S02–S30 : **TdC de 13,7 %**, 7 048 panneaux, 1 016 OF, aucune rupture, délai OF → livraison de 7 jours, pic du stock tampon de 1 103 pièces (limite 2 553).
+2. Le gain vient surtout du **regroupement hebdomadaire** : sur les mêmes OF, 19,1 % coupés par jour contre 14,3 % par semaine. Remplissage et restes n'ajoutent presque rien avec la limite de 3 semaines.
+3. Comparaison avec Schmidt (moyenne des semaines retenues) :
 
-- L'imbrication est une heuristique écrite par l'équipe, différente de l'optimiseur de Schmidt. Elle permet de comparer les scénarios entre eux, mais ses valeurs absolues restent indicatives.
-- La demande de la semaine suivante est supposée connue. Il faudra intégrer une prévision et son erreur.
-- Le stock tampon ne contient ici que la matière 215371, alors qu'en réalité il est partagé entre plusieurs matières.
-- Questions à poser au tuteur :
-  - QteParOF est-il un multiple obligatoire ou un minimum ?
-  - Quelle est la capacité de la scie par semaine ?
-  - Quelle est la capacité du stock au montage ?
-- Pistes pour la suite :
-  - exporter les meilleures combinaisons de pièces (livrable 1) ;
-  - faire pivoter les pièces sans fil dans l'imbrication, avant de comparer les autres matières (220965, 219106...) ;
-  - tester une fréquence fixe par article ;
-  - étendre l'outil aux autres matières.
+| Graphique | Schmidt réel | Notre recalcul, par jour | Regroupé par semaine |
+|---|---|---|---|
+| 215371 | 20,2 % | 19,3 % | **14,2 %** |
+| Toutes matières (épaisseur 16) | 16,1 % | 18,8 % | 15,1 % |
+| 221612 | 12,1 % | 12,5 % | 12,2 % |
+| 220965 | 14,4 % | 20,2 % | 17,8 % |
+| 219106 | 11,2 % | 17,0 % | 15,4 % |
+
+4. Pour 215371, notre recalcul de la situation actuelle (19,3 %) est proche du réel (20,2 %) : l'outil est fiable pour cette matière, et le regroupement hebdomadaire fait gagner environ 6 points.
+5. Ordre de grandeur économique : 1 point de TdC en moins représente environ 1 570 m² de panneaux par an pour toutes les matières, soit environ 7 900 € par an à 5 €/m² (prix supposé, à confirmer).
+
+## 6. Limites
+
+1. **La demande future est supposée connue.** L'outil rejoue l'historique : la quantité à couper en semaine t est calculée à partir de la consommation réelle de la semaine t+1, tirée des mouvements de stock. En exploitation, les clients passent commande de façon irrégulière et imprévisible ; l'outil ne prévoit pas ces commandes et ne sait pas réagir à une commande urgente arrivée en cours de semaine. Le « zéro rupture » obtenu ici n'est donc pas garanti en conditions réelles : il faudrait ajouter une prévision de la demande et un stock de sécurité calculé sur l'erreur de prévision.
+2. **Imbrication** : l'algorithme est une heuristique de l'équipe, différente de l'optimiseur Schmidt. Sur les petites matières sans fil (220965, 219106), notre recalcul dépasse le réel de 5 à 6 points ; pour elles, seule la comparaison entre nos deux courbes est valable.
+3. **Une seule matière planifiée** : les feuilles 1 et 2 ne concernent que 215371 ; le stock tampon est donc compté pour cette matière seule, alors qu'il est partagé.
+4. **Algorithmes gloutons** : le remplissage et l'ordre de coupe ne garantissent pas l'optimum ; l'ordre de coupe ne donne pas la position des pièces sur le panneau.
+5. **Hypothèses à confirmer avec Schmidt** : QteParOF (minimum ou multiple), capacité de la scie, capacité du stock au montage, unité des 3 192 du stock tampon, durée de conservation des restes, prix du panneau.
